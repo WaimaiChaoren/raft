@@ -1,8 +1,11 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"strings"
 )
 
 //------------------------------------------------------------------------------
@@ -43,20 +46,32 @@ func SetLogLevel(level int) {
 
 // Prints to the standard logger. Arguments are handled in the manner of
 // fmt.Print.
-func warn(v ...interface{}) {
-	logger.Print(v...)
+func warn(args ...interface{}) {
+	pc, _, line, _ := runtime.Caller(1)
+    	function := runtime.FuncForPC(pc)
+    	funcname := function.Name()
+    	msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    	log.Printf("[%s : %d] %s", funcname, line, msg)
 }
 
 // Prints to the standard logger. Arguments are handled in the manner of
 // fmt.Printf.
-func warnf(format string, v ...interface{}) {
-	logger.Printf(format, v...)
+func warnf(format string, args ...interface{}) {
+	pc, _, line, _ := runtime.Caller(1)
+    	function := runtime.FuncForPC(pc)
+    	funcname := function.Name()
+    	msg := fmt.Sprintf(format, args...)
+    	log.Printf("[%s : %d] %s", funcname, line, msg)
 }
 
 // Prints to the standard logger. Arguments are handled in the manner of
 // fmt.Println.
-func warnln(v ...interface{}) {
-	logger.Println(v...)
+func warnln(args ...interface{}) {
+	pc, _, line, _ := runtime.Caller(1)
+    	function := runtime.FuncForPC(pc)
+    	funcname := function.Name()
+    	msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    	log.Printf("[%s : %d] %s", funcname, line, msg)
 }
 
 //--------------------------------------
@@ -65,25 +80,37 @@ func warnln(v ...interface{}) {
 
 // Prints to the standard logger if debug mode is enabled. Arguments
 // are handled in the manner of fmt.Print.
-func debug(v ...interface{}) {
+func debug(args ...interface{}) {
 	if logLevel >= Debug {
-		logger.Print(v...)
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
 // Prints to the standard logger if debug mode is enabled. Arguments
 // are handled in the manner of fmt.Printf.
-func debugf(format string, v ...interface{}) {
+func debugf(format string, args ...interface{}) {
 	if logLevel >= Debug {
-		logger.Printf(format, v...)
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(format, args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
 // Prints to the standard logger if debug mode is enabled. Arguments
 // are handled in the manner of fmt.Println.
-func debugln(v ...interface{}) {
+func debugln(args ...interface{}) {
 	if logLevel >= Debug {
-		logger.Println(v...)
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
@@ -93,24 +120,42 @@ func debugln(v ...interface{}) {
 
 // Prints to the standard logger if trace debugging is enabled. Arguments
 // are handled in the manner of fmt.Print.
-func trace(v ...interface{}) {
+func trace(args ...interface{}) {
 	if logLevel >= Trace {
-		logger.Print(v...)
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
-// Prints to the standard logger if trace debugging is enabled. Arguments
-// are handled in the manner of fmt.Printf.
-func tracef(format string, v ...interface{}) {
+
+func tracef(format string, args ...interface{}) {
 	if logLevel >= Trace {
-		logger.Printf(format, v...)
+    		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(format, args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
-// Prints to the standard logger if trace debugging is enabled. Arguments
-// are handled in the manner of debugln.
-func traceln(v ...interface{}) {
+
+
+func traceln(args ...interface{}) {
 	if logLevel >= Trace {
-		logger.Println(v...)
+    		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
+
+
+func generateFmtStr(n int) string {
+        return strings.Repeat("%v ", n)
+}
+
+

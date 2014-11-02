@@ -69,29 +69,37 @@ func (e *LogEntry) Command() []byte {
 
 // Encodes the log entry to a buffer. Returns the number of bytes
 // written and any error that may have occurred.
+// 将一条日志记录编码并写到buffer中。
+// 返回写入的字节数。
 func (e *LogEntry) Encode(w io.Writer) (int, error) {
+	// protobuf序列化
 	b, err := proto.Marshal(e.pb)
 	if err != nil {
 		return -1, err
 	}
 
+	// 首先用8字节保存实际数据的长度
 	if _, err = fmt.Fprintf(w, "%8x\n", len(b)); err != nil {
 		return -1, err
 	}
 
+	// 最后写入实际数据
 	return w.Write(b)
 }
 
 // Decodes the log entry from a buffer. Returns the number of bytes read and
 // any error that occurs.
+// 从缓冲区中读取log记录。返回读取到字节数，以及可能遇到的错误。
 func (e *LogEntry) Decode(r io.Reader) (int, error) {
-
+	
+	// 前8字节表示此条记录的长度
 	var length int
 	_, err := fmt.Fscanf(r, "%8x\n", &length)
 	if err != nil {
 		return -1, err
 	}
 
+	// 根据上面获取的长度，读取实际数据
 	data := make([]byte, length)
 	_, err = io.ReadFull(r, data)
 
@@ -99,9 +107,11 @@ func (e *LogEntry) Decode(r io.Reader) (int, error) {
 		return -1, err
 	}
 
+	// 反序列化到e.pb的结构体中
 	if err = proto.Unmarshal(data, e.pb); err != nil {
 		return -1, err
 	}
 
+	// 返回实际的数据长度+8字节+1字节
 	return length + 8 + 1, nil
 }

@@ -42,6 +42,7 @@ type HTTPMuxer interface {
 //
 //------------------------------------------------------------------------------
 
+// 使用一个指定的路径"/raft"创建一个HTTP transporter
 // Creates a new HTTP transporter with the given path prefix.
 func NewHTTPTransporter(prefix string, timeout time.Duration) *HTTPTransporter {
 	t := &HTTPTransporter{
@@ -99,6 +100,7 @@ func (t *HTTPTransporter) SnapshotRecoveryPath() string {
 // Installation
 //--------------------------------------
 
+// 将处理各种请求的URL绑定到路由处理器上
 // Applies Raft routes to an HTTP router for a given server.
 func (t *HTTPTransporter) Install(server Server, mux HTTPMuxer) {
 	mux.HandleFunc(t.AppendEntriesPath(), t.appendEntriesHandler(server))
@@ -242,6 +244,15 @@ func (t *HTTPTransporter) appendEntriesHandler(server Server) http.HandlerFunc {
 			http.Error(w, "", http.StatusBadRequest)
 			return
 		}
+
+        entries := req.Entries
+        debugln("********************** log start **********************")
+        tracef("Term: %d, PrevLogIndex: %d, CommitIndex: %d, LeaderName: %s", req.Term, req.PrevLogIndex, req.CommitIndex, req.LeaderName)
+        for index := range entries {
+            item := entries[index]
+            debugln("Index: ", *(item.Index), "Term: ", *(item.Term), "CommandName: ", *(item.CommandName), "Command: ", string(item.Command))
+        }
+        debugln("*********************** log end ************************")
 
 		resp := server.AppendEntries(req)
 		if resp == nil {

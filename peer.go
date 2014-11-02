@@ -184,11 +184,20 @@ func (p *Peer) flush() {
 //--------------------------------------
 // Append Entries
 //--------------------------------------
-
+	
 // Sends an AppendEntries request to the peer through the transport.
 func (p *Peer) sendAppendEntriesRequest(req *AppendEntriesRequest) {
 	tracef("peer.append.send: %s->%s [prevLog:%v length: %v]\n",
 		p.server.Name(), p.Name, req.PrevLogIndex, len(req.Entries))
+	
+        entries := req.Entries
+        debugln("********************** log start **********************")
+        tracef("Term: %d, PrevLogIndex: %d, CommitIndex: %d, LeaderName: %s", req.Term, req.PrevLogIndex, req.CommitIndex, req.LeaderName)
+        for index := range entries {
+            item := entries[index]
+            debugln("Index: ", *(item.Index), "Term: ", *(item.Term), "CommandName: ", *(item.CommandName), "Command: ", string(item.Command))
+        }
+        debugln("*********************** log end ************************")
 
 	resp := p.server.Transporter().SendAppendEntriesRequest(p.server, p, req)
 	if resp == nil {

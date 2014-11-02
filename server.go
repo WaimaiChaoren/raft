@@ -11,6 +11,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"log"
+	"runtime"
 )
 
 //------------------------------------------------------------------------------
@@ -163,6 +165,14 @@ type ev struct {
 // compaction is to be disabled. context can be anything (including nil)
 // and is not used by the raft package except returned by
 // Server.Context(). connectionString can be anything.
+/*
+使用指定的log和路径创建一个新的server.
+transporter不能为空。
+如果log compaction和快照功能被禁止，则stateMachine可以为空。
+contenxt可以为任何对象（包括nil），并且除了使用Server.Context()之外，
+contexnt不会被任何raft的包使用。
+connectionString可以为任意对象。
+*/
 func NewServer(name string, path string, transporter Transporter, stateMachine StateMachine, ctx interface{}, connectionString string) (Server, error) {
 	if name == "" {
 		return nil, errors.New("raft.Server: Name cannot be blank")
@@ -186,6 +196,7 @@ func NewServer(name string, path string, transporter Transporter, stateMachine S
 		maxLogEntriesPerRequest: MaxLogEntriesPerRequest,
 		connectionString:        connectionString,
 	}
+	// 启动一个新的事件分发器
 	s.eventDispatcher = newEventDispatcher(s)
 
 	// Setup apply function.
@@ -429,6 +440,7 @@ func init() {
 	RegisterCommand(&DefaultLeaveCommand{})
 }
 
+// AEs = AppendEntries
 // Start the raft server
 // If log entries exist then allow promotion to candidate if no AEs received.
 // If no log entries exist then wait for AEs from another node.
@@ -467,6 +479,7 @@ func (s *server) Start() error {
 	s.routineGroup.Add(1)
 	go func() {
 		defer s.routineGroup.Done()
+		// 进入主事件循环
 		s.loop()
 	}()
 
@@ -665,6 +678,12 @@ func (s *server) sendAsync(value interface{}) {
 // Converts to candidate if election timeout elapses without either:
 //   1.Receiving valid AppendEntries RPC, or
 //   2.Granting vote to candidate
+/*
+当server是follower状态的时候，运行下面的事件循环。响应来自leader和candidates的RPC.
+当在选举超时时间内不存在以下情况，则转变状态为condidate:
+1. 收到空的AppendEntries RPC请求
+2. 答复来自condidate的投票请求
+*/
 func (s *server) followerLoop() {
 	since := time.Now()
 	electionTimeout := s.ElectionTimeout()
@@ -892,12 +911,14 @@ func (s *server) snapshotLoop() {
 
 // Attempts to execute a command and replicate it. The function will return
 // when the command has been successfully committed or an error has occurred.
-
+// 尝试执行一个命令，
 func (s *server) Do(command Command) (interface{}, error) {
 	return s.send(command)
 }
 
 // Processes a command.
+// 处理命令，首先将当前命令、当前term、事件等用protobuf编码
+// 然后写入到磁盘中
 func (s *server) processCommand(command Command, e *ev) {
 	s.debugln("server.command.process")
 
@@ -916,6 +937,7 @@ func (s *server) processCommand(command Command, e *ev) {
 		return
 	}
 
+	// 将本节点设置为已同步，计算同步节点的数量，也包括leader自身 
 	s.syncedPeer[s.Name()] = true
 	if len(s.peers) == 0 {
 		commitIndex := s.log.currentIndex()
@@ -947,6 +969,7 @@ func (s *server) processAppendEntriesRequest(req *AppendEntriesRequest) (*Append
 	if req.Term == s.currentTerm {
 		_assert(s.State() != Leader, "leader.elected.at.same.term.%d\n", s.currentTerm)
 
+		// 收到AppendEntries请求时，如果是Candidate就降级到Follower
 		// step-down to follower when it is a candidate
 		if s.state == Candidate {
 			// change state to follower
@@ -1063,9 +1086,11 @@ func (s *server) RequestVote(req *RequestVoteRequest) *RequestVoteResponse {
 }
 
 // Processes a "request vote" request.
+// 处理一个“请求投票“的请求
 func (s *server) processRequestVoteRequest(req *RequestVoteRequest) (*RequestVoteResponse, bool) {
 
 	// If the request is coming from an old term then reject it.
+	// 如果请来自一个旧的term，就拒绝它
 	if req.Term < s.Term() {
 		s.debugln("server.rv.deny.vote: cause stale term")
 		return newRequestVoteResponse(s.currentTerm, false), false
@@ -1074,6 +1099,8 @@ func (s *server) processRequestVoteRequest(req *RequestVoteRequest) (*RequestVot
 	// If the term of the request peer is larger than this node, update the term
 	// If the term is equal and we've already voted for a different candidate then
 	// don't vote for this candidate.
+	// 如果请求的term大于当前节点的term，就更新当前节点的term
+	// 如果term相同，并且当前节点已经为其他condidate投票，就不会为此次请求投票
 	if req.Term > s.Term() {
 		s.updateCurrentTerm(req.Term, "")
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
@@ -1082,6 +1109,7 @@ func (s *server) processRequestVoteRequest(req *RequestVoteRequest) (*RequestVot
 		return newRequestVoteResponse(s.currentTerm, false), false
 	}
 
+	// 如果condidate的log不和当前节点的一样新，就不会投票
 	// If the candidate's log is not at least as up-to-date as our last log then don't vote.
 	lastIndex, lastTerm := s.log.lastInfo()
 	if lastIndex > req.LastLogIndex || lastTerm > req.LastLogTerm {
@@ -1092,6 +1120,7 @@ func (s *server) processRequestVoteRequest(req *RequestVoteRequest) (*RequestVot
 	}
 
 	// If we made it this far then cast a vote and reset our election time out.
+	// 如果已经到了这里，说明我们可以为这个请求投票，并且更新当前节点的选举超时时间
 	s.debugln("server.rv.vote: ", s.name, " votes for", req.CandidateName, "at term", req.Term)
 	s.votedFor = req.CandidateName
 
@@ -1103,47 +1132,60 @@ func (s *server) processRequestVoteRequest(req *RequestVoteRequest) (*RequestVot
 //--------------------------------------
 
 // Adds a peer to the server.
+// 增加一个节点到服务器，这里服务器是指普遍的概念
+// 区分服务器只使用三种状态：leader/candidate/follower
+// 其他部分所有类型的server相同
 func (s *server) AddPeer(name string, connectiongString string) error {
 	s.debugln("server.peer.add: ", name, len(s.peers))
 
 	// Do not allow peers to be added twice.
+	// 不允许同一个节点被增加两次
 	if s.peers[name] != nil {
 		return nil
 	}
 
 	// Skip the Peer if it has the same name as the Server
+	// 如果节点和当前服务器的名字重复则跳过
 	if s.name != name {
 		peer := newPeer(s, name, connectiongString, s.heartbeatInterval)
 
+		// 如果当前节点的状态是leader，则立刻启动心跳循环
 		if s.State() == Leader {
 			peer.startHeartbeat()
 		}
 
 		s.peers[peer.Name] = peer
 
+		// 分发消息
 		s.DispatchEvent(newEvent(AddPeerEventType, name, nil))
 	}
 
 	// Write the configuration to file.
+	// 用同步的方式将节点信息写入到磁盘文件
 	s.writeConf()
 
 	return nil
 }
 
 // Removes a peer from the server.
+// 从当前服务器移除一个节点
 func (s *server) RemovePeer(name string) error {
 	s.debugln("server.peer.remove: ", name, len(s.peers))
 
 	// Skip the Peer if it has the same name as the Server
+	// 如果节点和当前服务器名字相同则跳过
 	if name != s.Name() {
 		// Return error if peer doesn't exist.
+		// 如果节点不存在则返回错误
 		peer := s.peers[name]
 		if peer == nil {
 			return fmt.Errorf("raft: Peer not found: %s", name)
 		}
 
 		// Stop peer and remove it.
+		// 停止并移除节点
 		if s.State() == Leader {
+			// 启动一个goroutine，防止死锁
 			// We create a go routine here to avoid potential deadlock.
 			// We are holding log write lock when reach this line of code.
 			// Peer.stopHeartbeat can be blocked without go routine, if the
@@ -1153,18 +1195,22 @@ func (s *server) RemovePeer(name string) error {
 			// which lead to a deadlock.
 			// TODO(xiangli) refactor log lock
 			s.routineGroup.Add(1)
+			// 停止相应节点的心跳循环
 			go func() {
 				defer s.routineGroup.Done()
 				peer.stopHeartbeat(true)
 			}()
 		}
 
+		// 从服务器的peers中删除节点的名称
 		delete(s.peers, name)
 
+		// 分发事件
 		s.DispatchEvent(newEvent(RemovePeerEventType, name, nil))
 	}
 
 	// Write the configuration to file.
+	// 将节点配置以同步的方式写入磁盘
 	s.writeConf()
 
 	return nil
@@ -1404,6 +1450,7 @@ func (s *server) FlushCommitIndex() {
 	s.writeConf()
 }
 
+// 以同步的方式将当前服务器的节点信息写入到磁盘
 func (s *server) writeConf() {
 
 	peers := make([]*Peer, len(s.peers))
@@ -1460,14 +1507,24 @@ func (s *server) readConf() error {
 // Debugging
 //--------------------------------------
 
-func (s *server) debugln(v ...interface{}) {
+func (s *server) debugln(args ...interface{}) {
 	if logLevel > Debug {
-		debugf("[%s Term:%d] %s", s.name, s.Term(), fmt.Sprintln(v...))
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
-func (s *server) traceln(v ...interface{}) {
+func (s *server) traceln(args ...interface{}) {
 	if logLevel > Trace {
-		tracef("[%s] %s", s.name, fmt.Sprintln(v...))
+		pc, _, line, _ := runtime.Caller(1)
+    		function := runtime.FuncForPC(pc)
+    		funcname := function.Name()
+    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+    		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
+
+

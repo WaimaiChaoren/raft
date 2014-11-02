@@ -18,6 +18,7 @@ import (
 //------------------------------------------------------------------------------
 
 // A log is a collection of log entries that are persisted to durable storage.
+// 日志是日志记录的集合，并且有持久化的保证。
 type Log struct {
 	ApplyFunc   func(*LogEntry, Command) (interface{}, error)
 	file        *os.File
@@ -26,6 +27,7 @@ type Log struct {
 	commitIndex uint64
 	mutex       sync.RWMutex
 	startIndex  uint64 // the index before the first entry in the Log entries
+					  // startIndex是相对于第一条日志的记录数
 	startTerm   uint64
 	initialized bool
 }
@@ -59,6 +61,7 @@ func newLog() *Log {
 // Log Indices
 //--------------------------------------
 
+// 最后被提交的日志的index
 // The last committed index in the log.
 func (l *Log) CommitIndex() uint64 {
 	l.mutex.RLock()
@@ -66,6 +69,7 @@ func (l *Log) CommitIndex() uint64 {
 	return l.commitIndex
 }
 
+// 当前日志的index
 // The current index in the log.
 func (l *Log) currentIndex() uint64 {
 	l.mutex.RLock()
@@ -73,6 +77,7 @@ func (l *Log) currentIndex() uint64 {
 	return l.internalCurrentIndex()
 }
 
+// 当前日志中没有被"锁定"的日志index
 // The current index in the log without locking
 func (l *Log) internalCurrentIndex() uint64 {
 	if len(l.entries) == 0 {
@@ -81,11 +86,13 @@ func (l *Log) internalCurrentIndex() uint64 {
 	return l.entries[len(l.entries)-1].Index()
 }
 
+// 下一个日志的index
 // The next index in the log.
 func (l *Log) nextIndex() uint64 {
 	return l.currentIndex() + 1
 }
 
+// 日志是否为空
 // Determines if the log contains zero entries.
 func (l *Log) isEmpty() bool {
 	l.mutex.RLock()
@@ -93,6 +100,7 @@ func (l *Log) isEmpty() bool {
 	return (len(l.entries) == 0) && (l.startIndex == 0)
 }
 
+// 日志中最后一个command的名称
 // The name of the last command in the log.
 func (l *Log) lastCommandName() string {
 	l.mutex.RLock()
@@ -132,6 +140,7 @@ func (l *Log) currentTerm() uint64 {
 
 // Opens the log file and reads existing entries. The log can remain open and
 // continue to append entries to the end of the log.
+// 打开log文件，并读取已存在的日志记录。
 func (l *Log) open(path string) error {
 	// Read all the entries from the log if one exists.
 	var readBytes int64
@@ -139,12 +148,14 @@ func (l *Log) open(path string) error {
 	var err error
 	debugln("log.open.open ", path)
 	// open log file
+	// 打开日志文件
 	l.file, err = os.OpenFile(path, os.O_RDWR, 0600)
 	l.path = path
 
 	if err != nil {
 		// if the log file does not exist before
 		// we create the log file and set commitIndex to 0
+		// 如果日志文件不存在，则创建一个并设置commitIndex为0
 		if os.IsNotExist(err) {
 			l.file, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600)
 			debugln("log.open.create ", path)
@@ -157,31 +168,44 @@ func (l *Log) open(path string) error {
 	}
 	debugln("log.open.exist ", path)
 
+	// 读取日志文件并解码记录
 	// Read the file and decode entries.
 	for {
 		// Instantiate log entry and decode into it.
+		
+		// 初始化一个空的日志
 		entry, _ := newLogEntry(l, nil, 0, 0, nil)
+		// 文件seek到0
 		entry.Position, _ = l.file.Seek(0, os.SEEK_CUR)
 
+		// 从文件中读取一条日志记录
 		n, err := entry.Decode(l.file)
 		if err != nil {
+			// 读到文件尾
 			if err == io.EOF {
 				debugln("open.log.append: finish ")
+			// 读取错误，将文件truncate
 			} else {
 				if err = os.Truncate(path, readBytes); err != nil {
 					return fmt.Errorf("raft.Log: Unable to recover: %v", err)
 				}
 			}
+			// 退出循环
 			break
 		}
+		// 如果读取的日志记录的index大于日志开始的index
 		if entry.Index() > l.startIndex {
 			// Append entry.
+			// 将日志添加到l.entries
 			l.entries = append(l.entries, entry)
+			// 获取日志中记录的command，并执行命令
 			if entry.Index() <= l.commitIndex {
 				command, err := newCommand(entry.CommandName(), entry.Command())
 				if err != nil {
+					// 如果命令信息出错，则继续循环
 					continue
 				}
+				// 调用在Server.Start中绑定的ApplyFunc函数
 				l.ApplyFunc(entry, command)
 			}
 			debugln("open.log.append log index ", entry.Index())
