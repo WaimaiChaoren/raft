@@ -116,6 +116,10 @@ func (t *HTTPTransporter) Install(server Server, mux HTTPMuxer) {
 // Sends an AppendEntries RPC to a peer.
 func (t *HTTPTransporter) SendAppendEntriesRequest(server Server, peer *Peer, req *AppendEntriesRequest) *AppendEntriesResponse {
 	var b bytes.Buffer
+	var local_req *http.Request
+	var httpResp *http.Response
+	var err error
+
 	if _, err := req.Encode(&b); err != nil {
 		traceln("transporter.ae.encoding.error:", err)
 		return nil
@@ -124,8 +128,18 @@ func (t *HTTPTransporter) SendAppendEntriesRequest(server Server, peer *Peer, re
 	url := joinPath(peer.ConnectionString, t.AppendEntriesPath())
 	traceln(server.Name(), "POST", url)
 
-	httpResp, err := t.httpClient.Post(url, "application/protobuf", &b)
-	if httpResp == nil || err != nil {
+	local_req, err = http.NewRequest("POST", url, &b)
+	if err != nil {
+		traceln("transporter.ae.newrequest.error:", err)
+		return nil
+	}
+
+	local_req.Close = true
+	local_req.Header.Add("Content-Type", "application/protobuf")
+
+	client := MakeHTTPClient(time.Second * 1)
+
+	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
 		traceln("transporter.ae.response.error:", err)
 		return nil
 	}
@@ -143,6 +157,10 @@ func (t *HTTPTransporter) SendAppendEntriesRequest(server Server, peer *Peer, re
 // Sends a RequestVote RPC to a peer.
 func (t *HTTPTransporter) SendVoteRequest(server Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
 	var b bytes.Buffer
+	var local_req *http.Request
+	var httpResp *http.Response
+	var err error
+
 	if _, err := req.Encode(&b); err != nil {
 		traceln("transporter.rv.encoding.error:", err)
 		return nil
@@ -151,8 +169,18 @@ func (t *HTTPTransporter) SendVoteRequest(server Server, peer *Peer, req *Reques
 	url := fmt.Sprintf("%s%s", peer.ConnectionString, t.RequestVotePath())
 	traceln(server.Name(), "POST", url)
 
-	httpResp, err := t.httpClient.Post(url, "application/protobuf", &b)
-	if httpResp == nil || err != nil {
+	local_req, err = http.NewRequest("POST", url, &b)
+	if err != nil {
+		traceln("transporter.rv.newrequest.error:", err)
+		return nil
+	}
+
+	local_req.Close = true
+	local_req.Header.Add("Content-Type", "application/protobuf")
+
+	client := MakeHTTPClient(time.Second * 1)
+
+	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
@@ -179,6 +207,10 @@ func joinPath(connectionString, thePath string) string {
 // Sends a SnapshotRequest RPC to a peer.
 func (t *HTTPTransporter) SendSnapshotRequest(server Server, peer *Peer, req *SnapshotRequest) *SnapshotResponse {
 	var b bytes.Buffer
+	var local_req *http.Request
+	var httpResp *http.Response
+	var err error
+
 	if _, err := req.Encode(&b); err != nil {
 		traceln("transporter.rv.encoding.error:", err)
 		return nil
@@ -187,8 +219,18 @@ func (t *HTTPTransporter) SendSnapshotRequest(server Server, peer *Peer, req *Sn
 	url := joinPath(peer.ConnectionString, t.snapshotPath)
 	traceln(server.Name(), "POST", url)
 
-	httpResp, err := t.httpClient.Post(url, "application/protobuf", &b)
-	if httpResp == nil || err != nil {
+	local_req, err = http.NewRequest("POST", url, &b)
+	if err != nil {
+		traceln("transporter.rv.newrequest.error:", err)
+		return nil
+	}
+
+	local_req.Close = true
+	local_req.Header.Add("Content-Type", "application/protobuf")
+
+	client := MakeHTTPClient(time.Second * 1)
+
+	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
@@ -206,6 +248,10 @@ func (t *HTTPTransporter) SendSnapshotRequest(server Server, peer *Peer, req *Sn
 // Sends a SnapshotRequest RPC to a peer.
 func (t *HTTPTransporter) SendSnapshotRecoveryRequest(server Server, peer *Peer, req *SnapshotRecoveryRequest) *SnapshotRecoveryResponse {
 	var b bytes.Buffer
+	var local_req *http.Request
+	var httpResp *http.Response
+	var err error
+
 	if _, err := req.Encode(&b); err != nil {
 		traceln("transporter.rv.encoding.error:", err)
 		return nil
@@ -214,8 +260,18 @@ func (t *HTTPTransporter) SendSnapshotRecoveryRequest(server Server, peer *Peer,
 	url := joinPath(peer.ConnectionString, t.snapshotRecoveryPath)
 	traceln(server.Name(), "POST", url)
 
-	httpResp, err := t.httpClient.Post(url, "application/protobuf", &b)
-	if httpResp == nil || err != nil {
+	local_req, err = http.NewRequest("POST", url, &b)
+	if err != nil {
+		traceln("transporter.rv.newrequest.error:", err)
+		return nil
+	}
+
+	local_req.Close = true
+	local_req.Header.Add("Content-Type", "application/protobuf")
+
+	client := MakeHTTPClient(time.Second * 1)
+
+	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
@@ -245,14 +301,14 @@ func (t *HTTPTransporter) appendEntriesHandler(server Server) http.HandlerFunc {
 			return
 		}
 
-        entries := req.Entries
-        debugln("********************** log start **********************")
-        tracef("Term: %d, PrevLogIndex: %d, CommitIndex: %d, LeaderName: %s", req.Term, req.PrevLogIndex, req.CommitIndex, req.LeaderName)
-        for index := range entries {
-            item := entries[index]
-            debugln("Index: ", *(item.Index), "Term: ", *(item.Term), "CommandName: ", *(item.CommandName), "Command: ", string(item.Command))
-        }
-        debugln("*********************** log end ************************")
+		entries := req.Entries
+		debugln("********************** log start **********************")
+		tracef("Term: %d, PrevLogIndex: %d, CommitIndex: %d, LeaderName: %s", req.Term, req.PrevLogIndex, req.CommitIndex, req.LeaderName)
+		for index := range entries {
+			item := entries[index]
+			debugln("Index: ", *(item.Index), "Term: ", *(item.Term), "CommandName: ", *(item.CommandName), "Command: ", string(item.Command))
+		}
+		debugln("*********************** log end ************************")
 
 		resp := server.AppendEntries(req)
 		if resp == nil {
