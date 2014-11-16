@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -30,6 +31,7 @@ type HTTPTransporter struct {
 	snapshotRecoveryPath string
 	httpClient           http.Client
 	Transport            *http.Transport
+	RoundTripper         http.RoundTripper
 }
 
 type HTTPMuxer interface {
@@ -52,10 +54,16 @@ func NewHTTPTransporter(prefix string, timeout time.Duration) *HTTPTransporter {
 		requestVotePath:      joinPath(prefix, "/requestVote"),
 		snapshotPath:         joinPath(prefix, "/snapshot"),
 		snapshotRecoveryPath: joinPath(prefix, "/snapshotRecovery"),
-		Transport:            &http.Transport{DisableKeepAlives: false},
+		Transport: &http.Transport{
+			Dial: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+		},
 	}
 	t.httpClient.Transport = t.Transport
 	t.Transport.ResponseHeaderTimeout = timeout
+	t.RoundTripper = t.Transport
 	return t
 }
 
@@ -137,9 +145,7 @@ func (t *HTTPTransporter) SendAppendEntriesRequest(server Server, peer *Peer, re
 	local_req.Close = true
 	local_req.Header.Add("Content-Type", "application/protobuf")
 
-	client := MakeHTTPClient(time.Second * 1)
-
-	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
+	if httpResp, err = t.RoundTripper.RoundTrip(local_req); err != nil || httpResp == nil {
 		traceln("transporter.ae.response.error:", err)
 		return nil
 	}
@@ -178,9 +184,7 @@ func (t *HTTPTransporter) SendVoteRequest(server Server, peer *Peer, req *Reques
 	local_req.Close = true
 	local_req.Header.Add("Content-Type", "application/protobuf")
 
-	client := MakeHTTPClient(time.Second * 1)
-
-	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
+	if httpResp, err = t.RoundTripper.RoundTrip(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
@@ -228,9 +232,7 @@ func (t *HTTPTransporter) SendSnapshotRequest(server Server, peer *Peer, req *Sn
 	local_req.Close = true
 	local_req.Header.Add("Content-Type", "application/protobuf")
 
-	client := MakeHTTPClient(time.Second * 1)
-
-	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
+	if httpResp, err = t.RoundTripper.RoundTrip(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
@@ -269,9 +271,7 @@ func (t *HTTPTransporter) SendSnapshotRecoveryRequest(server Server, peer *Peer,
 	local_req.Close = true
 	local_req.Header.Add("Content-Type", "application/protobuf")
 
-	client := MakeHTTPClient(time.Second * 1)
-
-	if httpResp, err = client.Do(local_req); err != nil || httpResp == nil {
+	if httpResp, err = t.RoundTripper.RoundTrip(local_req); err != nil || httpResp == nil {
 		traceln("transporter.rv.response.error:", err)
 		return nil
 	}
