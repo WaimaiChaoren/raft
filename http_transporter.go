@@ -57,7 +57,7 @@ func NewHTTPTransporter(prefix string, timeout time.Duration) *HTTPTransporter {
 		Transport: &http.Transport{
 			Dial: (&net.Dialer{
 				Timeout:   500 * time.Second,
-				KeepAlive: 500 * time.Second,
+				KeepAlive: 30 * time.Second,
 			}).Dial,
 		},
 	}
