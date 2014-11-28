@@ -56,8 +56,8 @@ func NewHTTPTransporter(prefix string, timeout time.Duration) *HTTPTransporter {
 		snapshotRecoveryPath: joinPath(prefix, "/snapshotRecovery"),
 		Transport: &http.Transport{
 			Dial: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   500 * time.Second,
+				KeepAlive: 500 * time.Second,
 			}).Dial,
 		},
 	}
