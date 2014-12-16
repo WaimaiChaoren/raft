@@ -27,7 +27,7 @@ type Log struct {
 	commitIndex uint64
 	mutex       sync.RWMutex
 	startIndex  uint64 // the index before the first entry in the Log entries
-					  // startIndex是相对于第一条日志的记录数
+	// startIndex是相对于第一条日志的记录数
 	startTerm   uint64
 	initialized bool
 }
@@ -172,7 +172,7 @@ func (l *Log) open(path string) error {
 	// Read the file and decode entries.
 	for {
 		// Instantiate log entry and decode into it.
-		
+
 		// 初始化一个空的日志
 		entry, _ := newLogEntry(l, nil, 0, 0, nil)
 		// 文件seek到0
@@ -184,7 +184,7 @@ func (l *Log) open(path string) error {
 			// 读到文件尾
 			if err == io.EOF {
 				debugln("open.log.append: finish ")
-			// 读取错误，将文件truncate
+				// 读取错误，将文件truncate
 			} else {
 				if err = os.Truncate(path, readBytes); err != nil {
 					return fmt.Errorf("raft.Log: Unable to recover: %v", err)
@@ -357,6 +357,9 @@ func (l *Log) setCommitIndex(index uint64) error {
 
 	// this is not error any more after limited the number of sending entries
 	// commit up to what we already have
+	/*
+		当commit的index大于当前节点所有的entries时，将最大的index设置为当前节点的
+	*/
 	if index > l.startIndex+uint64(len(l.entries)) {
 		debugln("raft.Log: Commit index", index, "set back to ", len(l.entries))
 		index = l.startIndex + uint64(len(l.entries))
@@ -377,6 +380,20 @@ func (l *Log) setCommitIndex(index uint64) error {
 	// when new leader 3 send heartbeat with committed index = 0 to follower 2,
 	// follower 2 should reply success and let leader 3 update the committed index to 80
 
+	/*
+		不允许之前的一些index(复数)再次成为commited
+
+		举例来说，leader 1发送log 80给follower2和follower3，
+		follower2和follower3都获得了最新的entries并且返回给leader 1,
+		leader 1提交entry 80并且发送响应给follower2和follower3,
+		于是follower3收到了新的已经被commited的index并且更新commited index到80.
+		但是leader 1发送commited index到follower3失败，
+		follower3升级为leader(server 1和server 2会投票，因为leader 3拥有最新的entries)
+		当新的leader 3携带commited index为0，然后发送心跳给follower2，
+		follower3应该返回成功，并且让leader 3升级commited index到80
+	*/
+
+	// 如果需要commit的index小于当前节点的commitIndex，返回nil，表示成功
 	if index < l.commitIndex {
 		return nil
 	}

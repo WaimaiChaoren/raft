@@ -291,10 +291,12 @@ func (t *HTTPTransporter) SendSnapshotRecoveryRequest(server Server, peer *Peer,
 //--------------------------------------
 
 // Handles incoming AppendEntries requests.
+// 处理进入的AppendEntries请求的Handler
 func (t *HTTPTransporter) appendEntriesHandler(server Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		traceln(server.Name(), "RECV /appendEntries")
 
+		// 反解码r.Body中protobuf编码的内容到一个AppendEntries的Request
 		req := &AppendEntriesRequest{}
 		if _, err := req.Decode(r.Body); err != nil {
 			http.Error(w, "", http.StatusBadRequest)
@@ -310,11 +312,15 @@ func (t *HTTPTransporter) appendEntriesHandler(server Server) http.HandlerFunc {
 		}
 		debugln("*********************** log end ************************")
 
+		// 将AppendEntries的请求发送到状态机中，并返回结果
+		// 例如follower loop/candidate loop/leader loop
 		resp := server.AppendEntries(req)
 		if resp == nil {
 			http.Error(w, "Failed creating response.", http.StatusInternalServerError)
 			return
 		}
+
+		// 将状态机执行的错误信息写到w中
 		if _, err := resp.Encode(w); err != nil {
 			http.Error(w, "", http.StatusInternalServerError)
 			return
@@ -323,21 +329,27 @@ func (t *HTTPTransporter) appendEntriesHandler(server Server) http.HandlerFunc {
 }
 
 // Handles incoming RequestVote requests.
+// 处理进入的RequestVote请求
 func (t *HTTPTransporter) requestVoteHandler(server Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		traceln(server.Name(), "RECV /requestVote")
 
+		/// 反解码r.Body中protobuf编码的内容到一个RequestVote的Request
 		req := &RequestVoteRequest{}
 		if _, err := req.Decode(r.Body); err != nil {
 			http.Error(w, "", http.StatusBadRequest)
 			return
 		}
 
+		// 将RequestVote的请求发送到状态机中，并返回结果
+		// 例如follower loop/candidate loop/leader loop
 		resp := server.RequestVote(req)
 		if resp == nil {
 			http.Error(w, "Failed creating response.", http.StatusInternalServerError)
 			return
 		}
+
+		// 将状态机执行的错误信息写到w中
 		if _, err := resp.Encode(w); err != nil {
 			http.Error(w, "", http.StatusInternalServerError)
 			return
@@ -346,6 +358,7 @@ func (t *HTTPTransporter) requestVoteHandler(server Server) http.HandlerFunc {
 }
 
 // Handles incoming Snapshot requests.
+// 处理进入的Snapshot请求
 func (t *HTTPTransporter) snapshotHandler(server Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		traceln(server.Name(), "RECV /snapshot")
@@ -369,6 +382,7 @@ func (t *HTTPTransporter) snapshotHandler(server Server) http.HandlerFunc {
 }
 
 // Handles incoming SnapshotRecovery requests.
+// 处理进入的快照恢复请求
 func (t *HTTPTransporter) snapshotRecoveryHandler(server Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		traceln(server.Name(), "RECV /snapshotRecovery")

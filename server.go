@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
-	"log"
-	"runtime"
 )
 
 //------------------------------------------------------------------------------
@@ -38,14 +38,18 @@ const (
 const (
 	// DefaultHeartbeatInterval is the interval that the leader will send
 	// AppendEntriesRequests to followers to maintain leadership.
+	// ElectionTimeoutThresholdPercent: leader定期发送心跳给followers维护leader关系的间隔
 	DefaultHeartbeatInterval = 50 * time.Millisecond
 
+	// 默认选举超时，当follower在指定的时间内未收到leader的心跳RPC，则进入candidate状态
 	DefaultElectionTimeout = 150 * time.Millisecond
 )
 
 // ElectionTimeoutThresholdPercent specifies the threshold at which the server
 // will dispatch warning events that the heartbeat RTT is too close to the
 // election timeout.
+// ElectionTimeoutThresholdPercent 指定了当server的heartbeat的RTT太接近与选举时间时，
+// 分配一个告警事件
 const ElectionTimeoutThresholdPercent = 0.8
 
 //------------------------------------------------------------------------------
@@ -629,6 +633,8 @@ func (s *server) loop() {
 
 // Sends an event to the event loop to be processed. The function will wait
 // until the event is actually processed before returning.
+// 发送事件到时间循环等待被处理。
+// 这个函数事件确实被处理了才返回。
 func (s *server) send(value interface{}) (interface{}, error) {
 	if !s.Running() {
 		return nil, StopError
@@ -691,7 +697,7 @@ func (s *server) followerLoop() {
 
 	for s.State() == Follower {
 		var err error
-		update := false
+		update := false // 指示follower是否可以升级到candidate的变量
 		select {
 		case <-s.stopped:
 			s.setState(Stopped)
@@ -702,6 +708,10 @@ func (s *server) followerLoop() {
 			case JoinCommand:
 				//If no log entries exist and a self-join command is issued
 				//then immediately become leader and commit entry.
+				/*
+					如果没有log entries存在并且执行了一个self-join的命令，
+					就会立即变成leader并且提交entry.
+				*/
 				if s.log.currentIndex() == 0 && req.NodeName() == s.Name() {
 					s.debugln("selfjoin and promote to leader")
 					s.setState(Leader)
@@ -709,8 +719,11 @@ func (s *server) followerLoop() {
 				} else {
 					err = NotLeaderError
 				}
+			// 如果follower收到的是
 			case *AppendEntriesRequest:
 				// If heartbeats get too close to the election timeout then send an event.
+				// 当follower收到心跳时，计算经过的时间
+				// 如果超过了选举时间阀值的80%，则分发一个事件
 				elapsedTime := time.Now().Sub(since)
 				if elapsedTime > time.Duration(float64(electionTimeout)*ElectionTimeoutThresholdPercent) {
 					s.DispatchEvent(newEvent(ElectionTimeoutThresholdEventType, elapsedTime, nil))
@@ -724,6 +737,7 @@ func (s *server) followerLoop() {
 				err = NotLeaderError
 			}
 			// Callback to event.
+			// 将执行的结果返回
 			e.c <- err
 
 		case <-timeoutChan:
@@ -937,8 +951,11 @@ func (s *server) processCommand(command Command, e *ev) {
 		return
 	}
 
-	// 将本节点设置为已同步，计算同步节点的数量，也包括leader自身 
+	// 将本节点设置为已同步，计算同步节点的数量，也包括leader自身
 	s.syncedPeer[s.Name()] = true
+
+	// 如果leader的peers数量为0，说明集群中只有leader
+	// 则leader自行提交
 	if len(s.peers) == 0 {
 		commitIndex := s.log.currentIndex()
 		s.log.setCommitIndex(commitIndex)
@@ -958,18 +975,23 @@ func (s *server) AppendEntries(req *AppendEntriesRequest) *AppendEntriesResponse
 }
 
 // Processes the "append entries" request.
+// 处理"追加记录"请求
 func (s *server) processAppendEntriesRequest(req *AppendEntriesRequest) (*AppendEntriesResponse, bool) {
 	s.traceln("server.ae.process")
 
+	// 如果AE的请求的Term小于当前的Term，则返回当前的Term和Index以及CommitIndex
 	if req.Term < s.currentTerm {
 		s.debugln("server.ae.error: stale term")
 		return newAppendEntriesResponse(s.currentTerm, false, s.log.currentIndex(), s.log.CommitIndex()), false
 	}
 
+	// 如果AE的请求的Term和当前的Term一样
 	if req.Term == s.currentTerm {
 		_assert(s.State() != Leader, "leader.elected.at.same.term.%d\n", s.currentTerm)
 
 		// 收到AppendEntries请求时，如果是Candidate就降级到Follower
+		// 因为如果当前是canditate，但是又收到了同样term的AE，说明这是来自新Leader的AE
+		// 当前节点必须降级到follower
 		// step-down to follower when it is a candidate
 		if s.state == Candidate {
 			// change state to follower
@@ -978,18 +1000,28 @@ func (s *server) processAppendEntriesRequest(req *AppendEntriesRequest) (*Append
 
 		// discover new leader when candidate
 		// save leader name when follower
+		// 更新当前节点的Leader为请求的Leader名称
 		s.leader = req.LeaderName
 	} else {
+		// 如果请求的Term大于当前Term，则更新当前Term的和LeaderName
 		// Update term and leader.
 		s.updateCurrentTerm(req.Term, req.LeaderName)
 	}
 
+	/*
+		首先将log截断到req中上一个index的位置，
+		这样做是因为要按照leader发来的AE中指定的位置截断日志，
+		为接下来追加记录，指定正确的位置
+	*/
+
+	// 将日志文件按照请求中指定的上一个index截断
 	// Reject if log doesn't contain a matching previous entry.
 	if err := s.log.truncate(req.PrevLogIndex, req.PrevLogTerm); err != nil {
 		s.debugln("server.ae.truncate.error: ", err)
 		return newAppendEntriesResponse(s.currentTerm, false, s.log.currentIndex(), s.log.CommitIndex()), true
 	}
 
+	// 将请求追加到日志
 	// Append entries to the log.
 	if err := s.log.appendEntries(req.Entries); err != nil {
 		s.debugln("server.ae.append.error: ", err)
@@ -1510,21 +1542,19 @@ func (s *server) readConf() error {
 func (s *server) debugln(args ...interface{}) {
 	if logLevel > Debug {
 		pc, _, line, _ := runtime.Caller(1)
-    		function := runtime.FuncForPC(pc)
-    		funcname := function.Name()
-    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
-    		log.Printf("[%s : %d] %s", funcname, line, msg)
+		function := runtime.FuncForPC(pc)
+		funcname := function.Name()
+		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
 
 func (s *server) traceln(args ...interface{}) {
 	if logLevel > Trace {
 		pc, _, line, _ := runtime.Caller(1)
-    		function := runtime.FuncForPC(pc)
-    		funcname := function.Name()
-    		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
-    		log.Printf("[%s : %d] %s", funcname, line, msg)
+		function := runtime.FuncForPC(pc)
+		funcname := function.Name()
+		msg := fmt.Sprintf(generateFmtStr(len(args)), args...)
+		log.Printf("[%s : %d] %s", funcname, line, msg)
 	}
 }
-
-

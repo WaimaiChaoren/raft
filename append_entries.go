@@ -4,7 +4,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"code.google.com/p/gogoprotobuf/proto"
+    "github.com/golang/protobuf/proto"
 	"github.com/shelmesky/raft/protobuf"
 )
 
@@ -66,6 +66,8 @@ func (req *AppendEntriesRequest) Encode(w io.Writer) (int, error) {
 
 // Decodes the AppendEntriesRequest from a buffer. Returns the number of bytes read and
 // any error that occurs.
+// 从一个buffer中解码AppendEntriesRequest请求
+// 返回读取到的字节数和错误信息
 func (req *AppendEntriesRequest) Decode(r io.Reader) (int, error) {
 	data, err := ioutil.ReadAll(r)
 
@@ -120,6 +122,8 @@ func (aer *AppendEntriesResponse) Success() bool {
 
 // Encodes the AppendEntriesResponse to a buffer. Returns the number of bytes
 // written and any error that may have occurred.
+// 将AppendEntries响应编码到一个缓存中
+// 返回写入的字节数和错误信息
 func (resp *AppendEntriesResponse) Encode(w io.Writer) (int, error) {
 	b, err := proto.Marshal(resp.pb)
 	if err != nil {
